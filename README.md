@@ -25,7 +25,14 @@ There are of course some assumptions and some caveats in the scenario I'm explai
 6) GLBP, a Cisco-proprietary alternative to HSRP and VRRP, can do the trick of having the connected switch always acting as IP gateway
 7) Cisco VPC, and probably other solutions for MC-LAG, also manage to do the trick of every switch acting as IP gateway
 
-To me an anycast gw is something you have when you are aiming for a fully-routed design with L3 at the access layer, _but for one reason or other you need some vlan stretching across switches_.  The valid reason for the latter could be VM mobility or device mobility in WiFi networks.  Both are probably solvable in other ways but they are at least credible reasons why you might need to trunk a vlan sometime.
+To me an anycast gw is something you have when you are aiming for a fully-routed design with L3 at the access layer, _but for one reason or other you need some vlan stretching across switches_.  The valid reason for the latter could be VM mobility or device mobility in WiFi networks.  Both are probably solvable in other ways but they are at least credible reasons why you might need to have the same vlan on separate switches.
 
 ## Can it be made work?
 
+So we get down to the question, could this work without EVPN?  What is it about EVPN that enables it?
+
+I had some ideas, but I wanted to test it out, and also see if maybe I could find any config knobs that would have made it possible with typical gear in the past.  My go-to for all labs these days is [container lab](https://containerlab.dev/), which is amazing, but alas the main virtual-device I wanted to use for this one was Cisco [IOSvL2](https://docs.gns3.com/docs/using-gns3/beginners/switching-and-gns3/#iosvl2), which is a virtual Cisco switch, not unlike the Catalyst series of old, which comes with Cisco's [VIRL](https://learningnetwork.cisco.com/s/virl).  It just felt to me the right platform and device to be using to test this "could we do this back in the day" hypothesis.
+
+There are no [vrnetlab](https://github.com/vrnetlab/vrnetlab) images to get IOSvL2 up and running quickly in containerlab, and not wanting to spend too much time on things I went back to the old reliable, [GNS3](https://www.gns3.com/).  This allowed me to quickly get a network of 5 switches built, connected as shown in the diagram at the top of the page.  I configured all the links between switches as layer-2 "trunks", but I set up a separate, dedicated vlan for each link on which I enabled OSPF.  So I sort of got an OSPF topology as if I had direct routed links everywhere, but using the vlan ints so I could also trunk other vlans.
+
+I added several linux containers to the mix.  1 connected to each of the access switches, named 'server 1', 'server 2', and 'server 3'.  These were connected on a normal access port in Vlan100.  I trunked this vlan between all the switches also.  
