@@ -14,7 +14,9 @@ He subsequently followed up with a very well written [blog piece](https://lostin
 
 ## Anycast GWs
 
-The concept of an anycast GW is fairly simple.  You have a "vlan" or "irb" interface configured on every participating switch in a vlan, all of which use the **same IP** and the **same MAC address**.  In this scneario you then have a situation where the switch a device is connected to is always acting as its IP gateway.  Unlike say with HSRP/VRRP where multiple swithces might be configured for the shared gateway, but only one is active at once.  In that scenario an outbound packet from a host might go from host -> switch1 -> switch2 and only then be routed to whatever external network is is going to.
+The concept of an anycast GW is fairly simple.  You have a "vlan" or "irb" interface configured on every participating switch in a vlan, all of which use the **same IP** and the **same MAC address**.  Obviously this is somewhat heretical, we have duplicate IPs on the same ethernet segment, and indeed duplicate MACs!  Not something anyone anticipated doing when the idea of running IPv4 over Ethernet first came about.  But anyway, it's something we do now and it works well, at least with virtual Ethernet networks built with an EVPN control plane.
+
+In the Anycast GW scneario the switch a device is connected to is always acting as its IP gateway.  Unlike say with HSRP/VRRP where multiple swithces might be configured for the shared gateway, but only one is active at once.  In that scenario an outbound packet from a host might go from host -> switch1 -> switch2 and only then be routed to whatever external network is is going to.
 
 There are of course some assumptions and some caveats in the scenario I'm explaining:
 
