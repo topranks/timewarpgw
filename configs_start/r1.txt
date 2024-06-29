@@ -1,0 +1,52 @@
+oot@R1:~# ip -4 -br addr show 
+lo               UNKNOWN        127.0.0.1/8 
+eth0             UNKNOWN        203.0.113.1/30 
+eth1             UNKNOWN        203.0.113.33/30 
+eth2             UNKNOWN        192.0.2.2/30 
+root@R1:~# 
+root@R1:~# cat /etc/bird/bird.conf 
+router id 203.0.113.1;
+
+filter user_range {
+    if (net = 192.0.2.0/30) then
+        {
+            accept;
+        }
+    else reject;
+}
+
+protocol device {
+    scan time 10;
+}
+
+protocol direct {
+    interface "*";
+    ipv4 {
+        export all;
+    };
+}
+
+protocol kernel {
+    ipv4 {
+        export all;
+    };
+}
+
+protocol bgp DSW1 {
+    local as 65001;
+    neighbor 203.0.113.2 as 65000 external;
+    ipv4 {
+        export filter user_range;
+        import all;
+    };
+}
+
+protocol bgp R2 {
+    local as 65001;
+    neighbor 203.0.113.34 as 65001 internal;
+    ipv4 {
+        export all;
+        import all;
+    };
+}
+

@@ -1,0 +1,106 @@
+DSW2#show run 
+Building configuration...
+
+Current configuration : 4927 bytes
+!
+! Last configuration change at 12:48:49 UTC Sat Jun 29 2024
+!
+version 15.2
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+service compress-config
+!
+hostname DSW2
+!
+boot-start-marker
+boot-end-marker
+!
+!
+!
+no aaa new-model
+!
+ip cef
+no ipv6 cef
+!
+!
+!
+spanning-tree mode pvst
+spanning-tree extend system-id
+spanning-tree vlan 100 priority 8192
+!
+!
+interface GigabitEthernet0/0
+ description ASW1 Gi0/1
+ switchport trunk allowed vlan 100,202
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ negotiation auto
+!
+interface GigabitEthernet0/1
+ description ASW2 Gu0/1
+ switchport trunk allowed vlan 100,204
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ negotiation auto
+!
+interface GigabitEthernet0/2
+ description ASW3 Gi0/1
+ switchport trunk allowed vlan 100,206
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ negotiation auto
+!
+interface GigabitEthernet2/0
+ description R2 eth0
+ no switchport
+ ip address 203.0.113.6 255.255.255.252
+ negotiation auto
+!
+interface Vlan100
+ description VLAN100 ANYCAST GW
+ mac-address 0200.5e77.7777
+ ip address 198.51.100.1 255.255.255.0 secondary
+ ip address 198.51.100.6 255.255.255.0
+!
+interface Vlan202
+ description Xlink to ASW1 over Gi0/0
+ ip address 203.0.113.13 255.255.255.252
+!
+interface Vlan204
+ description Xlink to ASW2 over Gi0/1
+ ip address 203.0.113.21 255.255.255.252
+!         
+interface Vlan206
+ description Xlink to ASW3 over Gi0/2
+ ip address 203.0.113.29 255.255.255.252
+!
+router ospf 1
+ network 203.0.113.12 0.0.0.3 area 0
+ network 203.0.113.20 0.0.0.3 area 0
+ network 203.0.113.28 0.0.0.3 area 0
+!
+router bgp 65000
+ bgp log-neighbor-changes
+ redistribute connected route-map BGP_REDIST_CONN
+ neighbor 203.0.113.5 remote-as 65001
+ neighbor 203.0.113.5 soft-reconfiguration inbound
+ neighbor 203.0.113.5 route-map BGP_R2_OUT out
+!
+ip forward-protocol nd
+!
+ip http server
+!
+!
+!
+ip prefix-list VLAN100 seq 5 permit 198.51.100.0/24
+!
+!
+route-map BGP_REDIST_CONN permit 100
+ match ip address prefix-list VLAN100
+!
+route-map BGP_R2_OUT permit 100
+ match ip address prefix-list VLAN100
+!
+!
+

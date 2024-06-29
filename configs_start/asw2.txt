@@ -1,0 +1,70 @@
+ASW2#show run 
+Building configuration...
+
+Current configuration : 4204 bytes
+!
+! Last configuration change at 12:38:16 UTC Sat Jun 29 2024
+!
+version 15.2
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+service compress-config
+!
+hostname ASW2
+!
+boot-start-marker
+boot-end-marker
+!
+!
+!
+no aaa new-model
+!
+!
+ip cef
+no ipv6 cef
+!
+!
+!
+spanning-tree mode pvst
+spanning-tree extend system-id
+!
+!
+interface GigabitEthernet0/0
+ description DSW1 Gi0/1
+ switchport trunk allowed vlan 100,203
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ negotiation auto
+!
+interface GigabitEthernet0/1
+ description DSW2 Gi0/1
+ switchport trunk allowed vlan 100,204
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ negotiation auto
+!
+interface GigabitEthernet1/0
+ description S2 eth0 
+ switchport access vlan 100
+ switchport mode access
+ negotiation auto
+!
+interface Vlan100
+ description VLAN100 ANYCAST GW
+ mac-address 0200.5e77.7777
+ ip address 198.51.100.1 255.255.255.0 secondary
+ ip address 198.51.100.3 255.255.255.0
+!
+interface Vlan203
+ description Xlink to DSW1 over Gi0/0
+ ip address 203.0.113.18 255.255.255.252
+!
+interface Vlan204
+ description Xlink to DSW2 over Gi0/1
+ ip address 203.0.113.22 255.255.255.252
+!
+router ospf 1
+ network 203.0.113.16 0.0.0.3 area 0
+ network 203.0.113.20 0.0.0.3 area 0
+!         

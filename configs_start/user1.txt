@@ -1,0 +1,8 @@
+root@USER1:~# ip -4 -br addr show 
+lo               UNKNOWN        127.0.0.1/8 
+eth0             UNKNOWN        192.0.2.1/30 
+root@USER1:~# 
+root@USER1:~# ip -4 route show 
+default via 192.0.2.2 dev eth0 
+192.0.2.0/30 dev eth0 proto kernel scope link src 192.0.2.1 
+root@USER1:~# 

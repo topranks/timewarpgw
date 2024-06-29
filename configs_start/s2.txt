@@ -1,0 +1,13 @@
+root@S2:~# ip -4 -br addr show 
+lo               UNKNOWN        127.0.0.1/8 
+eth0             UNKNOWN        198.51.100.12/24 
+root@S2:~# 
+root@S2:~# 
+root@S2:~# ip -4 route show 
+default via 198.51.100.1 dev eth0 
+198.51.100.0/24 dev eth0 proto kernel scope link src 198.51.100.12 
+root@S2:~# 
+root@S2:~# ip neigh show 
+198.51.100.11 dev eth0 lladdr 0a:9f:eb:b1:ba:f4 STALE
+198.51.100.1 dev eth0 lladdr 02:00:5e:77:77:77 STALE
+
