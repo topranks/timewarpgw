@@ -8,7 +8,7 @@ Network lab to test the premise of Anycast GW without EVPN
 
 [Daniel Dib](https://x.com/danieldibswe) recently asked a very interesting question on Twitter:
 
-[<img src="https://raw.githubusercontent.com/topranks/timewarpgw/main/twitterq.png"](https://x.com/danieldibswe/status/1800244577150161345)
+[<img src="https://raw.githubusercontent.com/topranks/timewarpgw/main/twitterq.png">](https://x.com/danieldibswe/status/1800244577150161345)
 
 He subsequently followed up with a very well written [blog piece](https://lostintransit.se/2024/06/25/why-didnt-we-have-anycast-gateways-before-vxlan/) on the matter.  However it was clear to me that Daniel was thinking of the question in a different way than I was.  His approach was to ask "why we didn't do anycast gateways given how we set up networks in the past", whereas I was thinking of it more in terms of "do we need EVPN to have anycast gw's, what about EVPN enables anycast gw?".
 
