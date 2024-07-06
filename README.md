@@ -162,4 +162,26 @@ listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
 
 Firing up Wireshark from GNS3 the ARPs are visible on all 3 layer-2 trunks from DSW1 to the ASWs:
 
-![topology](https://raw.githubusercontent.com/topranks/timewarpgw/main/timewarp.png)
+![arp_attempt](https://raw.githubusercontent.com/topranks/timewarpgw/main/arp_attempt.png)
+
+But clearly ASW1 is not forwarding this broadcast out the access port to S1.  We can only assume that ASW1 does not like the source MAC on these frames being the same as it has on it's local Vlan100 interface, and is dropping them.
+
+So I was slightly wrong about what would happen - at least with this virtual Cisco Catalyst switch - but in general the theory was correct.  **Having the same MAC configured on the Vlan interface across all switches prevents them from completing the ARP process for any hosts that aren't directly connected.**
+
+## EVPN
+
+How does EVPN solve this?  Well it's quite simple, in EVPN we have the EVPN/BGP control plane which distributes MAC/IP bindings in type-2 routes, so a remote switch does not have to send ARP requests to know the MAC for an IP connected anywhere on the fabric.  The control plane solves the issue for us.
+
+## Could we make it work?
+
+Are there any other tricks we could use to make it work?  Perhaps.
+
+### Ditch mobility - stop using a shared MAC
+
+Could we not use a shared MAC address on every switch?  If each had a unique MAC on the Vlan100 interface they should be able to ARP for hosts on the vlan right?
+
+The major issue with this is that when a server ARPs for its gateway the broadcast will hit all switches as expected.  And they will all reply as they have the same IP configured.  If we have a shared MAC the multiple/duplicate ARP responses don't matter, they all respond with the same MAC for the GW IP so it doesn't matter.  But if they all respond with different MACs then the host will randomly insert one or other in its ARP table.  And then we may not have the first-hop switch routing traffic again, defeating the purpose.
+
+But there is maybe a trick we can do here.  What if we create an ACL on the trunk links between switches to drop any ARP response that comes from the Vlan100 VIP address then servers should only ever see the correct ARP response from the directly-connected switch.
+
+
