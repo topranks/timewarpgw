@@ -3,12 +3,14 @@ lo               UNKNOWN        127.0.0.1/8
 eth0             UNKNOWN        203.0.113.5/30 
 eth1             UNKNOWN        203.0.113.34/30 
 root@R2:~# 
-root@R2:~# cat /etc/bird/bird.conf 
+
+root@R2:/etc/bird# cat bird.conf 
 router id 203.0.113.5;
 
 filter user_range {
     if (net = 192.0.2.0/30) then
         {
+            bgp_med = 100;
             accept;
         }
     else reject;
