@@ -43,11 +43,10 @@ But what happens with inbound traffic?  Assume we are announcing the /24 IPv4 ra
 
 But what happens if the packet from outside routes to a switch the destination is not connected to?  That switch will try to ARP for the destination IP as before, but what happens?
 
-**My theory was that the ARP would flood in the vlan as expected, and reach the host, but the response would not make it back to the switch that made the request**.  
 
 [<img src="https://raw.githubusercontent.com/topranks/timewarpgw/main/tweet_problem.png">](https://x.com/toprankinrez/status/1800429524833984726)
 
-Instead the switch that the host is connected to would see the ARP response, with a destination MAC that it has locally configured on 'Vlan100', and try to process it itself.  The fact that all the devices are sharing a MAC on that interface, and thus have to use that MAC to source ARP requests, is going to prevent ARP responses getting back to any device other than the directly-connected one.
+**My theory was that the ARP would flood in the vlan as expected, and reach the host, but the response would not make it back to the switch that made the request**.  Instead the switch that the host is connected to would see the ARP response, with a destination MAC that it has locally configured on 'Vlan100', and try to process it itself.  The fact that all the devices are sharing a MAC on that interface, and thus have to use that MAC to source ARP requests, is going to prevent ARP responses getting back to any device other than the directly-connected one.
 
 
 ## Lab test
@@ -183,10 +182,139 @@ Are there any other tricks we could use to make it work?  Perhaps.
 
 ### Ditch mobility - stop using a shared MAC
 
-Could we not use a shared MAC address on every switch?  If each had a unique MAC on the Vlan100 interface they should be able to ARP for hosts on the vlan right?
+Could we abandon using a shared MAC address on every switch?  If each had a unique MAC on the Vlan100 interface they should be able to ARP for hosts on the vlan right?
 
-The major issue with this is that when a server ARPs for its gateway the broadcast will hit all switches as expected.  And they will all reply as they have the same IP configured.  If we have a shared MAC the multiple/duplicate ARP responses don't matter, they all respond with the same MAC for the GW IP so it doesn't matter.  But if they all respond with different MACs then the host will randomly insert one or other in its ARP table.  And then we may not have the first-hop switch routing traffic again, defeating the purpose.
+The major issue with this is that when a server ARPs for its gateway the broadcast will hit all switches as expected.  And they will all reply as they have the same IP configured.  If we have a shared MAC the multiple/duplicate ARP responses don't matter, they all respond with the same MAC for the GW IP so it doesn't matter which response is received first.  But if they all respond with different MACs then the host will randomly insert one or other in its ARP table.  And then we may not have the first-hop switch routing traffic again, defeating the purpose.
 
-But there is maybe a trick we can do here.  What if we create an ACL on the trunk links between switches to drop any ARP response that comes from the Vlan100 VIP address then servers should only ever see the correct ARP response from the directly-connected switch.
+It might be possible to do this if we could put access-lists on the trunk ports between switches (but not access ports facing servers), _blocking ARP responses for the shared GW IP_.  Unfortuantely IOSvL2 doesn't seem to provide the ability to filter on this specifically so I couldn't try it.
 
+This approach would also cause issues with VM mobility or wireless clients etc., as a host that moved its connection point to the network from one switch to another would have the wrong MAC still in its ARP cache for its gateway.  Traffic would still probably flow, but things would be sub-optimal until the client ARP entry expired and it retried the process, replacing the old switches MAC with the new one in its ARP table.
 
+### Enter HSRP
+
+Given the root of the problem is the requirement to ARP for hosts on the Vlan from any switch, while at the same time configuring every switch with the same IP and MAC, can we think of any other way to do it?
+
+HSRP, when set up, uses two MAC addresses on a given interface.  It uses a unique MAC for packets sent by its unique IP, and a shared MAC (based on group ID) for packets sent from the shared VIP IP.  So it gives us what we need in terms of having two MAC/IP combinations, one unique it can use to source ARPs from, and another shared which act as gateway for connected hosts.
+
+The issue of course is HSRP is not an Anycast gateway.  All devices will send HELLOs and a single active device will become active, and the rest all standby.  But what if we deliberatley mess with HSRP and block its control traffic?  Let's reconfigure all the Vlan100 interfaces like this:
+```
+ip access-list extended DROP_HSRP
+ deny ip any host 224.0.0.102
+ permit ip any any
+!
+interface Vlan100
+ description VLAN100 ANYCAST GW
+ ip address 198.51.100.x 255.255.255.0
+ ip access-group DROP_HSRP in
+ standby version 2
+ standby 100 ip 198.51.100.1
+```
+
+Now if we look on any given switch it will be active, for instance DSW1:
+```
+DSW1#show standby 
+Vlan100 - Group 100 (version 2)
+  State is Active
+    4 state changes, last state change 00:03:00
+  Virtual IP address is 198.51.100.1
+  Active virtual MAC address is 0000.0c9f.f064 (MAC In Use)
+```
+
+Or ASW1:
+```
+ASW1#show standby 
+Vlan100 - Group 100 (version 2)
+  State is Active
+    2 state changes, last state change 00:03:01
+  Virtual IP address is 198.51.100.1
+  Active virtual MAC address is 0000.0c9f.f064 (MAC In Use)
+```
+
+So how do things look from our host now?  Success!  We can ping the USER1 IP:
+```
+root@S1:~# ping 192.0.2.1 
+PING 192.0.2.1 (192.0.2.1) 56(84) bytes of data.
+64 bytes from 192.0.2.1: icmp_seq=1 ttl=62 time=2.14 ms
+64 bytes from 192.0.2.1: icmp_seq=2 ttl=62 time=1.80 ms
+```
+
+If we go to the USER1 container and trace out how do things look?  A traceroute shows the packets for any server going thorugh DSW1 and then hitting the server:
+
+```
+root@USER1:~# mtr -c 3 -r 198.51.100.11
+Start: 2024-07-06T13:55:25+0000
+HOST: USER1                       Loss%   Snt   Last   Avg  Best  Wrst StDev
+  1.|-- 192.0.2.2                  0.0%     3    0.2   0.2   0.2   0.2   0.0    # R1
+  2.|-- 203.0.113.2                0.0%     3    1.0   1.0   0.9   1.0   0.1    # DSW1
+  3.|-- 198.51.100.11              0.0%     3    2.7   2.1   1.8   2.7   0.5    # S1
+```
+
+```
+root@USER1:~# mtr -c 3 -r 198.51.100.12
+Start: 2024-07-06T13:55:37+0000
+HOST: USER1                       Loss%   Snt   Last   Avg  Best  Wrst StDev
+  1.|-- 192.0.2.2                  0.0%     3    0.1   0.1   0.1   0.2   0.0   # R1
+  2.|-- 203.0.113.2                0.0%     3    1.1   1.0   1.0   1.1   0.1   # DSW1
+  3.|-- 198.51.100.12              0.0%     3    2.2   2.0   1.4   2.3   0.4   # S2
+```
+
+We don't see the ASW in the path as the packet is bridged within the vlan by DSW1.  But the forwarding path should be optimal.  The key thing is DSW1 can now ARP for the server IPs, using its unique (rather than shared HSRP) MAC on the Vlan:
+```
+interface Vlan100
+ description VLAN100 ANYCAST GW
+ ip address 198.51.100.5 255.255.255.0
+ ip access-group DROP_HSRP in
+ standby version 2
+ standby 100 ip 198.51.100.1
+```
+Ping works from here too:
+```
+DSW1#ping 198.51.100.11         
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 198.51.100.11, timeout is 2 seconds:
+!!!!!
+Success rate is 100 percent (5/5), round-trip min/avg/max = 1/1/2 ms
+```
+
+If we debug ARP we can see the switch using it's unique IP/MAC to make the ARP request, and the response comes back:
+```
+*Jul  6 14:01:51.647: IP ARP: creating incomplete entry for IP address: 198.51.100.11 interface Vlan100
+*Jul  6 14:01:51.647: IP ARP: sent req src 198.51.100.5 0c3c.054b.8064,
+                 dst 198.51.100.11 0000.0000.0000 Vlan100
+*Jul  6 14:01:51.649:  ARP rep is dequeued src 198.51.100.11/ce18.e085.6321, dst 198.51.100.5/0c3c.054b.8064 on Vlan100
+*Jul  6 14:01:51.649: IP ARP: arp_process_request: 198.51.100.11, hw: ce18.e085.6321; rc: 3
+*Jul  6 14:01:51.649: IP ARP: rcvd rep src 198.51.100.11 ce18.e085.6321, dst 198.51.100.5 0c3c.054b.8064 Vlan100
+```
+
+When the server ARPs for the GW IP, 198.51.100.1, the broadcast hits all the switches in the Vlan, and they all respond:
+```
+DSW1:
+
+*Jul  6 14:05:37.460:  ARP req is dequeued src 198.51.100.11/ce18.e085.6321, dst 198.51.100.1/0000.0000.0000 on Vlan100
+*Jul  6 14:05:37.460: IP ARP: arp_process_request: 198.51.100.11, hw: ce18.e085.6321; rc: 3
+*Jul  6 14:05:37.461: IP ARP: rcvd req src 198.51.100.11 ce18.e085.6321, dst 198.51.100.1 0000.0000.0000 Vlan100
+*Jul  6 14:05:37.461: IP ARP: sent rep src 198.51.100.1 0000.0c9f.f064,
+                 dst 198.51.100.11 ce18.e085.6321 Vlan100
+
+ASW1:
+
+*Jul  6 14:05:37.553:  ARP req is dequeued src 198.51.100.11/ce18.e085.6321, dst 198.51.100.1/0000.0000.0000 on Vlan100
+*Jul  6 14:05:37.553: IP ARP: arp_process_request: 198.51.100.11, hw: ce18.e085.6321; rc: 3
+*Jul  6 14:05:37.553: IP ARP: rcvd req src 198.51.100.11 ce18.e085.6321, dst 198.51.100.1 0000.0000.0000 Vlan100
+*Jul  6 14:05:37.553: IP ARP: sent rep src 198.51.100.1 0000.0c9f.f064,
+                 dst 198.51.100.11 ce18.e085.6321 Vlan100
+
+```
+
+But ultimately this doesn't matter, the MAC they respond with is the same in all cases, so S1 inserts the correct entry in its ARP table.  Frames it sends to that MAC will always be processed by its connected top-of-rack, so routing works.
+
+```
+root@S1:~# ip neigh show 
+198.51.100.1 dev eth0 lladdr 00:00:0c:9f:f0:64 REACHABLE
+```
+
+## Conclusion
+
+So can we do an Anycast GW without EVPN?  I guess the answer is "kinda".  With bog-standard Ethernet and ARP we have a problem as we can't have a shared MAC address across all switches for the gateway, and still allow ARP to work everywhere.  If we add HSRP to the mix, and mess with it so that all the switches think they are active, we can pretty much get it to work.  This shouldn't be a surprise as Cisco's alternative to HSRP, GLBP, allowed for this for many years.  As do many protocols for MC-LAG such as VPC.
+
+Daniel's point still stands.  In the typical L2 setup people used to do there is limited point trying this.  But if you were so inclined you could have all-active routing at the first hop, on a Vlan that is stretched across multiple devices.  If inbound routing sends traffic to a switch the destination isn't on then normal ARP + L2 bridging will get it from there to the destination just fine.
