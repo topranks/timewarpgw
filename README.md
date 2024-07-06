@@ -76,6 +76,7 @@ PING 198.51.100.1 (198.51.100.1) 56(84) bytes of data.
 64 bytes from 198.51.100.1: icmp_seq=1 ttl=255 time=1.01 ms
 64 bytes from 198.51.100.1: icmp_seq=2 ttl=255 time=1.01 ms
 ```
+```
 root@S1:~# ip -4 neigh show dev eth0
 198.51.100.1 lladdr 02:00:5e:77:77:77 REACHABLE
 ```
