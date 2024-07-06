@@ -43,7 +43,11 @@ But what happens with inbound traffic?  Assume we are announcing the /24 IPv4 ra
 
 But what happens if the packet from outside routes to a switch the destination is not connected to?  That switch will try to ARP for the destination IP as before, but what happens?
 
-**My theory was that the ARP would flood in the vlan as expected, and reach the host, but the response would not make it back to the switch that made the request**.  Instead the switch that the host is connected to would see the ARP response, with a destination MAC that it has locally configured on 'Vlan100', and try to process it itself.  The fact that all the devices are sharing a MAC on that interface, and thus have to use that MAC to source ARP requests, is going to prevent ARP responses getting back to any device other than the directly-connected one.
+**My theory was that the ARP would flood in the vlan as expected, and reach the host, but the response would not make it back to the switch that made the request**.  
+
+[<img src="https://raw.githubusercontent.com/topranks/timewarpgw/main/tweet_problem.png">](https://x.com/toprankinrez/status/1800429524833984726)
+
+Instead the switch that the host is connected to would see the ARP response, with a destination MAC that it has locally configured on 'Vlan100', and try to process it itself.  The fact that all the devices are sharing a MAC on that interface, and thus have to use that MAC to source ARP requests, is going to prevent ARP responses getting back to any device other than the directly-connected one.
 
 
 ## Lab test
