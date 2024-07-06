@@ -10,17 +10,17 @@ Network lab to test the premise of Anycast GW without EVPN
 
 [<img src="https://raw.githubusercontent.com/topranks/timewarpgw/main/twitterq.png">](https://x.com/danieldibswe/status/1800244577150161345)
 
-He subsequently followed up with a very well written [blog piece](https://lostintransit.se/2024/06/25/why-didnt-we-have-anycast-gateways-before-vxlan/) on the matter.  However it was clear to me that Daniel was thinking of the question in a different way than I was.  His approach was to ask "why we didn't do anycast gateways given how we set up networks in the past", whereas I was thinking of it more in terms of "do we need EVPN to have anycast gw's, what about EVPN enables anycast gw?".
+He subsequently followed up with a very well written [blog piece](https://lostintransit.se/2024/06/25/why-didnt-we-have-anycast-gateways-before-vxlan/) on the matter.  However it was clear to me that Daniel was thinking of the question in a different way than I was.  His approach was to ask "why we didn't do anycast gateways given how we set up networks in the past", whereas I was thinking of it more in terms of "why COULDN'T we do anycast gateways in the past"?  What is it about EVPN that suddenly opens up this possibility?
 
 ## Anycast GWs
 
 Let's define what we mean by Anycast GW here.  To my mind it means a "vlan" or "irb" interface configured on every participating switch in a vlan, all of which use the **same IP** and the **same MAC address**.
 
-To me the advantage of having such a thing is being able to have _a streched vlan, with routing down to the access layer and every switch acting as gateway for connected hosts_.  Daniel in his blog describes in a scenario in which an Anycast GW is of no benefit - spanning tree means traffic will always forward via one distribution switch, so it as VRRP master is fine.  But I was more interested in the 
+To me the advantage of having such a thing is being able to have _a streched vlan, with routing down to the access layer and every switch acting as gateway for connected hosts_.  Daniel in his blog describes in a scenario in which an Anycast GW is of no benefit - spanning tree means traffic will always forward via one distribution switch, so it as VRRP master is fine.  Which answers the question of why DIDN'T we do it in that scenario.  But I wanted to know if it could be made work with a setup closer to what we do now, without EVPN or other modern protocols.
 
 ### Benefits
 
-The key benefit of having routing done on the first network device hosts are connected to is to have an optimal outbound path for packets a host on a Vlan sends to external IP networks.  The path traffic takes within a vlan is not affected by the use of Anycast GW, either with old-style vlan trunking, EVPN or anything else.  But for traffic going externally it is a benefit if the first switch processing the packet can route it, rather than briding it to another switch at layer-2 which then makes does the layer-3 lookup.
+The key benefit of having routing done at the access layer is to have an optimal outbound path for packets going outside the local subnet.  The path traffic takes within a vlan is not affected by the use of Anycast GW, either with old-style vlan trunking, EVPN or anything else.  But for traffic going externally it is better to do the layer-3 function at the first hop, than briding to another device in the vlan and having it done there instead.
 
 ### Setup
 
@@ -33,16 +33,15 @@ interface Vlan100
  ip address 198.51.100.X 255.255.255.0
 ```
 
-The idea here is that every switch that is configued for the vlan has an IP int on it, and we configure the same "secondary" IP on every one.  We also configure the same MAC address on each.  This ensures any ARP response for the 198.51.100.1 gateway from any switch will always have the correct MAC, regardless of what switch sends it.  So if a device moves from one switch to another (VM move or WiFi client for instance) they can continue sending external traffic to the same GW MAC.
+The idea here is that every switch that is configued for the vlan has an IP int on it, and we configure the same "secondary" IP on every one.  We also configure the same MAC address on each.  This ensures any ARP response for the 198.51.100.1 gateway will always have the correct MAC, coming from any switch.
 
 ### So what won't work?
 
-Outbound traffic should work fine, with whatever switch a user is connected to dealing with frames for the GW MAC and routing them to their destination.
+Outbound traffic should work fine, with whatever switch a user is connected to dealing with frames for the GW MAC and forwarding it from there based on the IP routing table.
 
-But what happens with inbound traffic?  Assume we are announcing the /24 IPv4 range belonging to this subnet to external routers from one or more switches participating in the Vlan.  How does a switch, receiving a packet for a host on the subnet, know what port it's on?  Without EVPN or any other fanciness this will be down to ARP.  If the packet from outside arrives on the switch the destination host is directly connected to this probably works ok.  The top-of-rack can send an ARP from the shared MAC address and will process the reply from the host, building the IP<->MAC binding and then use the L2 forwarding table to determine what port the MAC is on.  Things should work.
+But what happens with inbound traffic?  Assume we are announcing the /24 IPv4 range belonging to this subnet to external routers from one or more switches participating in the Vlan.  How does a switch, receiving a packet for a host on the subnet, know what port it's on?  Without EVPN or any other fanciness this will be down to ARP.  If the packet from outside arrives on the switch the destination host is directly connected to this probably works ok.  The top-of-rack can send an ARP from the shared MAC address and will process the reply from the host, building the IP<->MAC binding and then use the L2 forwarding table to determine what port the MAC is on.  Ok so far.
 
 But what happens if the packet from outside routes to a switch the destination is not connected to?  That switch will try to ARP for the destination IP as before, but what happens?
-
 
 [<img src="https://raw.githubusercontent.com/topranks/timewarpgw/main/tweet_problem.png">](https://x.com/toprankinrez/status/1800429524833984726)
 
@@ -51,7 +50,7 @@ But what happens if the packet from outside routes to a switch the destination i
 
 ## Lab test
 
-So I decided to test this out to see what would happen, and if there were any tricks of config knobs we could use to instead make it work.
+I decided to test this out to see what would happen, and if there were any tricks of config knobs we could use to instead make it work.
 
 ### Lab setup
 
@@ -59,7 +58,24 @@ My go-to for all labs these days is [container lab](https://containerlab.dev/), 
 
 There are no [vrnetlab](https://github.com/vrnetlab/vrnetlab) images to get IOSvL2 up and running quickly in containerlab, and not wanting to spend too much time on things I went back to the old reliable, [GNS3](https://www.gns3.com/).  This allowed me to quickly get a network of 5 switches built, connected as shown in the diagram at the top of the page.  I configured all the links between switches as layer-2 "trunks", but I set up a separate, dedicated vlan for each link on which I enabled OSPF.  So I sort of got an OSPF topology as if I had direct routed links everywhere, but using the vlan ints so I could also trunk other vlans.
 
-I added several linux containers to the mix.  1 connected to each of the access switches, named 'server 1', 'server 2', and 'server 3'.  These were connected on a normal access port in Vlan100.  I trunked this vlan between all the switches also.  Every switch had the Vlan100 interface configured as shown in the last section, with the same MAC manually applied and the same 'secondary' IP.
+I added several linux containers to the mix.  Three were connected to the three 'ASW' devices, on a normal access port in Vlan100, to simulate normal end hosts (S1, S2 and S3).  Vlan100 was trunked between all the switches, and all of them had a Vlan100 interface configured as shown in the last section, with the same MAC manually applied and the same 'secondary' IP.
+
+Two other Linux containers were set up to simulate edge routes (R1 and R2), with EBGP peering to the two DSWs.  I probably should have used all OSPF or BGP tbh, I was trying to keep things simple and dumb to test the important stuff, but the redistribution was more effort than it was worth.
+
+The last container, USER1, was connected to R1 to simulate an external network destination for tests.
+
+### Spanning tree
+
+Again to Daniel's point in his blog, spanning tree limits how optimal the path can be.  On DSW2, for instance, we see it blocks the ports towards ASW2 and ASW3, instead learning MACs from those switches from ASW1 (which in turn has learnt them from DSW2).
+```
+DSW2#show spanning-tree blockedports         
+
+Name                 Blocked Interfaces List
+-------------------- ------------------------------------
+VLAN0100             Gi0/1, Gi0/2
+```
+
+A trunk between the DSWs would improve this, but ultimately this will always happen with a layer-2 spread across devices and spanning tree.  VRRP or an Anycast GW won't have an effect on that.  But an Anycast GW could optimise the outbound path for routed traffic if we can make it work, which is what I set out to do.
 
 ### Checks
 
@@ -99,8 +115,6 @@ Routing entry for 192.0.2.0/30
       Route tag 65001
 ```
 
-(NOTE - I should have either just used OSPF or BGP for the routing, I tried to do what I thought would be quickest and ended up having to do more complex BGP<->OSPF redistribution that I'd like, but not relevant to the overall question).
-
 Anyway ASW1 can trace just fine to this IP (note it is not using either of its IPs on Vlan100 to source this).
 ```
 ASW1#traceroute 192.0.2.1 
@@ -121,7 +135,7 @@ PING 192.0.2.1 (192.0.2.1) 56(84) bytes of data.
 3 packets transmitted, 0 received, 100% packet loss, time 2032ms
 ```
 
-Failed much as we expected, but was my theory right?  Looking on USER1 we can see the requests getting there, and replies are sent back:
+Much as we expected it failed, but was my theory right?  Looking on USER1 we can see the requests getting there, and replies are sent back:
 ```
 root@USER1:~# tcpdump -i eth0 icmp 
 listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
@@ -129,7 +143,7 @@ listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
 12:29:03.946099 IP 192.0.2.1 > 198.51.100.11: ICMP echo reply, id 8, seq 1, length 64
 ```
 
-So the theory that outbound traffic won't be affect seems to bear out.  What on the return path is broken?  On R1 we see the traffic is being sent back to DSW1:
+So the theory that outbound traffic would be ok seems correct.  What on the return path is broken?  On R1 we see the traffic is being sent back to DSW1:
 ```
 root@R1:/etc/bird# tcpdump -i eth0 -l -p icmp
 listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
@@ -144,7 +158,6 @@ DSW1#show ip arp Vlan100
 Protocol  Address          Age (min)  Hardware Addr   Type   Interface
 Internet  198.51.100.5            -   0200.5e77.7777  ARPA   Vlan100
 Internet  198.51.100.1            -   0200.5e77.7777  ARPA   Vlan100
-Internet  198.51.100.2            0   Incomplete      ARPA   
 Internet  198.51.100.11           0   Incomplete      ARPA   
 ```
 A debug shows this clearer:
@@ -164,17 +177,17 @@ listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
 0 packets captured
 ```
 
-Firing up Wireshark from GNS3 the ARPs are visible on all 3 layer-2 trunks from DSW1 to the ASWs:
+Firing up Wireshark from GNS3 the ARP broadcasts are visible on all three layer-2 trunks from DSW1 to the ASWs:
 
 ![arp_attempt](https://raw.githubusercontent.com/topranks/timewarpgw/main/arp_attempt.png)
 
-But clearly ASW1 is not forwarding this broadcast out the access port to S1.  We can only assume that ASW1 does not like the source MAC on these frames being the same as it has on it's local Vlan100 interface, and is dropping them.
+But clearly ASW1 is not forwarding this broadcast out the access port to S1.  We can only assume the ASWs do not like the source MAC on these frames being the same as they have on their local Vlan100 interface, and drop them.
 
 So I was slightly wrong about what would happen - at least with this virtual Cisco Catalyst switch - but in general the theory was correct.  **Having the same MAC configured on the Vlan interface across all switches prevents them from completing the ARP process for any hosts that aren't directly connected.**
 
 ## EVPN
 
-How does EVPN solve this?  Well it's quite simple, in EVPN we have the EVPN/BGP control plane which distributes MAC/IP bindings in type-2 routes, so a remote switch does not have to send ARP requests to know the MAC for an IP connected anywhere on the fabric.  The control plane solves the issue for us.
+How does EVPN solve this?  Well it's quite simple, in EVPN we have the EVPN/BGP control plane which distributes MAC/IP bindings in type-2 routes, so a remote switch does not have to send ARP requests to know the MAC for an IP connected anywhere on the fabric, and indeed has the destination VTEP from the route.  The control plane solves the issue for us.
 
 ## Could we make it work?
 
@@ -184,9 +197,11 @@ Are there any other tricks we could use to make it work?  Perhaps.
 
 Could we abandon using a shared MAC address on every switch?  If each had a unique MAC on the Vlan100 interface they should be able to ARP for hosts on the vlan right?
 
-The major issue with this is that when a server ARPs for its gateway the broadcast will hit all switches as expected.  And they will all reply as they have the same IP configured.  If we have a shared MAC the multiple/duplicate ARP responses don't matter, they all respond with the same MAC for the GW IP so it doesn't matter which response is received first.  But if they all respond with different MACs then the host will randomly insert one or other in its ARP table.  And then we may not have the first-hop switch routing traffic again, defeating the purpose.
+The major issue with this is that when a server ARPs for its gateway the broadcast will hit all switches as expected.  And they will all reply as they have the same IP configured.  If we have a _shared_ MAC the multiple/duplicate ARP responses don't matter, they all carry the same answer.  But if they all respond with _different_ MACs then the host will randomly insert one or other in its ARP table.  So a server can end up using a gateway other than the switch it's connected to.
 
-It might be possible to do this if we could put access-lists on the trunk ports between switches (but not access ports facing servers), _blocking ARP responses for the shared GW IP_.  Unfortuantely IOSvL2 doesn't seem to provide the ability to filter on this specifically so I couldn't try it.
+I thought it might be possible to do this if we could put access-lists on the trunk ports between switches (but not access ports facing servers), to _block the ARP responses for the shared GW IP_.  In other words ensure when a server sends an ARP request for the GW the only response that will reach it is from the switch it's directly connected to.  Responses would be generated by the other switches, but blocked on the inter-switch links.
+
+Unfortuantely IOSvL2 doesn't seem to provide the ability to filter on this specifically so I couldn't try it.
 
 This approach would also cause issues with VM mobility or wireless clients etc., as a host that moved its connection point to the network from one switch to another would have the wrong MAC still in its ARP cache for its gateway.  Traffic would still probably flow, but things would be sub-optimal until the client ARP entry expired and it retried the process, replacing the old switches MAC with the new one in its ARP table.
 
@@ -194,9 +209,9 @@ This approach would also cause issues with VM mobility or wireless clients etc.,
 
 Given the root of the problem is the requirement to ARP for hosts on the Vlan from any switch, while at the same time configuring every switch with the same IP and MAC, can we think of any other way to do it?
 
-HSRP, when set up, uses two MAC addresses on a given interface.  It uses a unique MAC for packets sent by its unique IP, and a shared MAC (based on group ID) for packets sent from the shared VIP IP.  So it gives us what we need in terms of having two MAC/IP combinations, one unique it can use to source ARPs from, and another shared which act as gateway for connected hosts.
+HSRP, when set up, uses two MAC addresses on a given interface.  It uses a unique MAC for packets sent by its unique IP, and a shared MAC (based on group ID) for packets sent from the shared VIP IP.  So it gives us what we need in terms of having two MAC/IP combinations, a unique one it uses to source ARPs from, and a shared one which acts as gateway for connected hosts.
 
-The issue of course is HSRP is not an Anycast gateway.  All devices will send HELLOs and a single active device will become active, and the rest all standby.  But what if we deliberatley mess with HSRP and block its control traffic?  Let's reconfigure all the Vlan100 interfaces like this:
+The issue of course is HSRP is not an Anycast gateway.  A single device will become active, and the rest all standby.  But what if we deliberatley mess with HSRP and block its control traffic?  Let's reconfigure all the Vlan100 interfaces like this, which an ACL to block the HSRP multicast address it uses:
 ```
 ip access-list extended DROP_HSRP
  deny ip any host 224.0.0.102
@@ -210,7 +225,7 @@ interface Vlan100
  standby 100 ip 198.51.100.1
 ```
 
-Now if we look on any given switch it will be active, for instance DSW1:
+Now if we look on any given switch it will be active, for instance:
 ```
 DSW1#show standby 
 Vlan100 - Group 100 (version 2)
@@ -220,7 +235,6 @@ Vlan100 - Group 100 (version 2)
   Active virtual MAC address is 0000.0c9f.f064 (MAC In Use)
 ```
 
-Or ASW1:
 ```
 ASW1#show standby 
 Vlan100 - Group 100 (version 2)
@@ -247,15 +261,6 @@ HOST: USER1                       Loss%   Snt   Last   Avg  Best  Wrst StDev
   1.|-- 192.0.2.2                  0.0%     3    0.2   0.2   0.2   0.2   0.0    # R1
   2.|-- 203.0.113.2                0.0%     3    1.0   1.0   0.9   1.0   0.1    # DSW1
   3.|-- 198.51.100.11              0.0%     3    2.7   2.1   1.8   2.7   0.5    # S1
-```
-
-```
-root@USER1:~# mtr -c 3 -r 198.51.100.12
-Start: 2024-07-06T13:55:37+0000
-HOST: USER1                       Loss%   Snt   Last   Avg  Best  Wrst StDev
-  1.|-- 192.0.2.2                  0.0%     3    0.1   0.1   0.1   0.2   0.0   # R1
-  2.|-- 203.0.113.2                0.0%     3    1.1   1.0   1.0   1.1   0.1   # DSW1
-  3.|-- 198.51.100.12              0.0%     3    2.2   2.0   1.4   2.3   0.4   # S2
 ```
 
 We don't see the ASW in the path as the packet is bridged within the vlan by DSW1.  But the forwarding path should be optimal.  The key thing is DSW1 can now ARP for the server IPs, using its unique (rather than shared HSRP) MAC on the Vlan:
