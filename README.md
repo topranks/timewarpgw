@@ -16,7 +16,7 @@ He subsequently followed up with a very well written [blog piece](https://lostin
 
 Let's define what we mean by Anycast GW here.  To my mind it means a "vlan" or "irb" interface configured on every participating switch in a vlan, all of which use the **same IP** and the **same MAC address**.
 
-To me the advantage of having such a thing is being able to make every top-of-rack or access switch act as gateway for connected hosts.  Daniel in his blog describes in a scenario in which an Anycast GW is of no benefit - spanning tree means traffic will always forward via one distribution switch, so it as VRRP master is fine.  But I wanted more to assess what would prevent us using Anycast GW in a scenario where it would bring some benefits, i.e. with a routed access layer.
+To me the advantage of having such a thing is being able to have _a streched vlan, with routing down to the access layer and every switch acting as gateway for connected hosts_.  Daniel in his blog describes in a scenario in which an Anycast GW is of no benefit - spanning tree means traffic will always forward via one distribution switch, so it as VRRP master is fine.  But I was more interested in the 
 
 ### Benefits
 
