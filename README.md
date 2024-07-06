@@ -80,5 +80,86 @@ root@S1:~# ip -4 neigh show dev eth0
 198.51.100.1 lladdr 02:00:5e:77:77:77 REACHABLE
 ```
 
-Ok all seems good there.  But what does a trace out to USER1 look like?
+Ok all seems good there.  But what does a trace out to USER1 look like, which has IP address 192.0.2.1.
 
+Firstly let's check this is ok from ASW1 where S1 is connected to.  Routing looks ok, it's learnt in OSPF (being redistributed from BGP by the DSWs):
+```
+ASW1#show ip route 192.0.2.1 
+Routing entry for 192.0.2.0/30
+  Known via "ospf 1", distance 110, metric 51
+  Tag 65001, type extern 1
+  Last update from 203.0.113.9 on Vlan201, 00:02:55 ago
+  Routing Descriptor Blocks:
+  * 203.0.113.9, from 203.0.113.25, 00:02:55 ago, via Vlan201
+      Route metric is 51, traffic share count is 1
+      Route tag 65001
+```
+
+(NOTE - I should have either just used OSPF or BGP for the routing, I tried to do what I thought would be quickest and ended up having to do more complex BGP<->OSPF redistribution that I'd like, but not relevant to the overall question).
+
+Anyway ASW1 can trace just fine to this IP (note it is not using either of its IPs on Vlan100 to source this).
+```
+ASW1#traceroute 192.0.2.1 
+Type escape sequence to abort.
+Tracing the route to 192.0.2.1
+VRF info: (vrf in name/id, vrf out name/id)
+  1 203.0.113.9 1 msec 1 msec 2 msec
+  2 203.0.113.1 1 msec 2 msec 1 msec
+  3 192.0.2.1 2 msec 1 msec 3 msec
+```
+
+What happens if we ping from S1?
+```
+root@S1:~# ping -c 3 192.0.2.1
+PING 192.0.2.1 (192.0.2.1) 56(84) bytes of data.
+
+--- 192.0.2.1 ping statistics ---
+3 packets transmitted, 0 received, 100% packet loss, time 2032ms
+```
+
+Failed much as we expected, but was my theory right?  Looking on USER1 we can see the requests getting there, and replies are sent back:
+```
+root@USER1:~# tcpdump -i eth0 icmp 
+listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:29:03.946079 IP 198.51.100.11 > 192.0.2.1: ICMP echo request, id 8, seq 1, length 64
+12:29:03.946099 IP 192.0.2.1 > 198.51.100.11: ICMP echo reply, id 8, seq 1, length 64
+```
+
+So the theory that outbound traffic won't be affect seems to bear out.  What on the return path is broken?  On R1 we see the traffic is being sent back to DSW1:
+```
+root@R1:/etc/bird# tcpdump -i eth0 -l -p icmp
+listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:30:10.463859 IP 198.51.100.11 > 192.0.2.1: ICMP echo request, id 9, seq 1, length 64
+12:30:10.463978 IP 192.0.2.1 > 198.51.100.11: ICMP echo reply, id 9, seq 1, length 64
+```
+
+But what happens on DSW1?  As expected it is trying to ARP for the S1s IP, 198.51.100.11, but this is failing:
+
+```
+DSW1#show ip arp Vlan100
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  198.51.100.5            -   0200.5e77.7777  ARPA   Vlan100
+Internet  198.51.100.1            -   0200.5e77.7777  ARPA   Vlan100
+Internet  198.51.100.2            0   Incomplete      ARPA   
+Internet  198.51.100.11           0   Incomplete      ARPA   
+```
+A debug shows this clearer:
+```
+*Jul  6 12:39:59.662: IP ARP: creating incomplete entry for IP address: 198.51.100.11 interface Vlan100
+*Jul  6 12:39:59.662: IP ARP: sent req src 198.51.100.5 0200.5e77.7777,
+                 dst 198.51.100.11 0000.0000.0000 Vlan100
+*Jul  6 12:40:01.689: IP ARP: sent req src 198.51.100.5 0200.5e77.7777,
+                 dst 198.51.100.11 0000.0000.0000 Vlan100
+```
+
+However my theory wasn't 100% correct.  On S1 we don't seem to receive these ARPs:
+```
+root@S1:~# tcpdump -i eth0 -l -p -nn arp 
+listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+^C
+0 packets captured
+```
+
+Firing up Wireshark from GNS3 the ARPs are visible on all 3 layer-2 trunks from DSW1 to the ASWs:
+
+![topology](https://raw.githubusercontent.com/topranks/timewarpgw/main/timewarp.png)
